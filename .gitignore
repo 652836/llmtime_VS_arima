@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual env / local python env
+.venv/
+venv/
+env/
+
+# Local runtime config / secrets
+.env
+.env.*
+configs/runtime.local.json
+
+# Logs
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Experiment outputs / temp files
+outputs/
+tmp/
+temp/
+
+# Optional: local notebook exports or scratch files
+*.tmp
+*.bak
