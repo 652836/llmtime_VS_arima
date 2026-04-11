@@ -1,88 +1,87 @@
-from functools import partial
-from models.gpt import gpt_completion_fn, gpt_nll_fn
-from models.gpt import tokenize_fn as gpt_tokenize_fn
+﻿from functools import partial
+
+from models.gpt import gpt_completion_fn, gpt_nll_fn, tokenize_fn as remote_tokenize_fn
 from models.llama import llama_completion_fn, llama_nll_fn
 from models.llama import tokenize_fn as llama_tokenize_fn
+from models.model_registry import get_model_capabilities, get_model_spec
 
-# Required: Text completion function for each model
-# -----------------------------------------------
-# Each model is mapped to a function that samples text completions.
-# The completion function should follow this signature:
-# 
-# Args:
-#   - input_str (str): String representation of the input time series.
-#   - steps (int): Number of steps to predict.
-#   - settings (SerializerSettings): Serialization settings.
-#   - num_samples (int): Number of completions to sample.
-#   - temp (float): Temperature parameter for model's output randomness.
-# 
-# Returns:
-#   - list: Sampled completion strings from the model.
-completion_fns = {
-    'text-davinci-003': partial(gpt_completion_fn, model='text-davinci-003'),
-    'gpt-4': partial(gpt_completion_fn, model='gpt-4'),
-    'gpt-3.5-turbo-instruct': partial(gpt_completion_fn, model='gpt-3.5-turbo-instruct'),
-    'llama-7b': partial(llama_completion_fn, model='7b'),
-    'llama-13b': partial(llama_completion_fn, model='13b'),
-    'llama-70b': partial(llama_completion_fn, model='70b'),
-    'llama-7b-chat': partial(llama_completion_fn, model='7b-chat'),
-    'llama-13b-chat': partial(llama_completion_fn, model='13b-chat'),
-    'llama-70b-chat': partial(llama_completion_fn, model='70b-chat'),
+
+_LEGACY_LLAMA_COMPLETIONS = {
+    "llama-7b": partial(llama_completion_fn, model="7b"),
+    "llama-13b": partial(llama_completion_fn, model="13b"),
+    "llama-70b": partial(llama_completion_fn, model="70b"),
+    "llama-7b-chat": partial(llama_completion_fn, model="7b-chat"),
+    "llama-13b-chat": partial(llama_completion_fn, model="13b-chat"),
+    "llama-70b-chat": partial(llama_completion_fn, model="70b-chat"),
 }
 
-# Optional: NLL/D functions for each model
-# -----------------------------------------------
-# Each model is mapped to a function that computes the continuous Negative Log-Likelihood 
-# per Dimension (NLL/D). This is used for computing likelihoods only and not needed for sampling.
-# 
-# The NLL function should follow this signature:
-# 
-# Args:
-#   - input_arr (np.ndarray): Input time series (history) after data transformation.
-#   - target_arr (np.ndarray): Ground truth series (future) after data transformation.
-#   - settings (SerializerSettings): Serialization settings.
-#   - transform (callable): Data transformation function (e.g., scaling) for determining the Jacobian factor.
-#   - count_seps (bool): If True, count time step separators in NLL computation, required if allowing variable number of digits.
-#   - temp (float): Temperature parameter for sampling.
-# 
-# Returns:
-#   - float: Computed NLL per dimension for p(target_arr | input_arr).
-nll_fns = {
-    'text-davinci-003': partial(gpt_nll_fn, model='text-davinci-003'),
-    'llama-7b': partial(llama_nll_fn, model='7b'),
-    'llama-13b': partial(llama_nll_fn, model='13b'),
-    'llama-70b': partial(llama_nll_fn, model='70b'),
-    'llama-7b-chat': partial(llama_nll_fn, model='7b-chat'),
-    'llama-13b-chat': partial(llama_nll_fn, model='13b-chat'),
-    'llama-70b-chat': partial(llama_nll_fn, model='70b-chat'),
+
+_LEGACY_LLAMA_NLL = {
+    "llama-7b": partial(llama_nll_fn, model="7b"),
+    "llama-13b": partial(llama_nll_fn, model="13b"),
+    "llama-70b": partial(llama_nll_fn, model="70b"),
+    "llama-7b-chat": partial(llama_nll_fn, model="7b-chat"),
+    "llama-13b-chat": partial(llama_nll_fn, model="13b-chat"),
+    "llama-70b-chat": partial(llama_nll_fn, model="70b-chat"),
 }
 
-# Optional: Tokenization function for each model, only needed if you want automatic input truncation.
-# The tokenization function should follow this signature:
-#
-# Args:
-#   - str (str): A string to tokenize.
-# Returns:
-#   - token_ids (list): A list of token ids.
-tokenization_fns = {
-    'text-davinci-003': partial(gpt_tokenize_fn, model='text-davinci-003'),
-    'gpt-3.5-turbo-instruct': partial(gpt_tokenize_fn, model='gpt-3.5-turbo-instruct'),
-    'llama-7b': partial(llama_tokenize_fn, model='7b'),
-    'llama-13b': partial(llama_tokenize_fn, model='13b'),
-    'llama-70b': partial(llama_tokenize_fn, model='70b'),
-    'llama-7b-chat': partial(llama_tokenize_fn, model='7b-chat'),
-    'llama-13b-chat': partial(llama_tokenize_fn, model='13b-chat'),
-    'llama-70b-chat': partial(llama_tokenize_fn, model='70b-chat'),
+
+_LEGACY_LLAMA_TOKENIZATION = {
+    "llama-7b": partial(llama_tokenize_fn, model="7b"),
+    "llama-13b": partial(llama_tokenize_fn, model="13b"),
+    "llama-70b": partial(llama_tokenize_fn, model="70b"),
+    "llama-7b-chat": partial(llama_tokenize_fn, model="7b-chat"),
+    "llama-13b-chat": partial(llama_tokenize_fn, model="13b-chat"),
+    "llama-70b-chat": partial(llama_tokenize_fn, model="70b-chat"),
 }
 
-# Optional: Context lengths for each model, only needed if you want automatic input truncation.
-context_lengths = {
-    'text-davinci-003': 4097,
-    'gpt-3.5-turbo-instruct': 4097,
-    'llama-7b': 4096,
-    'llama-13b': 4096,
-    'llama-70b': 4096,
-    'llama-7b-chat': 4096,
-    'llama-13b-chat': 4096,
-    'llama-70b-chat': 4096,
+
+_LEGACY_LLAMA_CONTEXT_LENGTHS = {
+    "llama-7b": 4096,
+    "llama-13b": 4096,
+    "llama-70b": 4096,
+    "llama-7b-chat": 4096,
+    "llama-13b-chat": 4096,
+    "llama-70b-chat": 4096,
 }
+
+
+
+def get_completion_fn(model):
+    if model in _LEGACY_LLAMA_COMPLETIONS:
+        return _LEGACY_LLAMA_COMPLETIONS[model]
+
+    capabilities = get_model_capabilities(model)
+    if capabilities.supports_sampling:
+        return partial(gpt_completion_fn, model=model)
+
+    raise KeyError("No completion function registered for model %s" % model)
+
+
+
+def get_nll_fn(model):
+    if model in _LEGACY_LLAMA_NLL:
+        return _LEGACY_LLAMA_NLL[model]
+
+    capabilities = get_model_capabilities(model)
+    if capabilities.supports_nll:
+        return partial(gpt_nll_fn, model=model)
+    return None
+
+
+
+def get_tokenization_fn(model):
+    if model in _LEGACY_LLAMA_TOKENIZATION:
+        return _LEGACY_LLAMA_TOKENIZATION[model]
+
+    spec = get_model_spec(model)
+    if spec.tokenizer_name_or_alias is None and spec.context_length is None:
+        return None
+    return partial(remote_tokenize_fn, model=model)
+
+
+
+def get_context_length(model):
+    if model in _LEGACY_LLAMA_CONTEXT_LENGTHS:
+        return _LEGACY_LLAMA_CONTEXT_LENGTHS[model]
+    return get_model_spec(model).context_length

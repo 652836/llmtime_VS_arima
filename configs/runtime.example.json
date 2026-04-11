@@ -1,0 +1,29 @@
+﻿{
+  "default_model": "qwen-plus",
+  "max_concurrency": 4,
+  "request_timeout_seconds": 120,
+  "providers": {
+    "qwen": {
+      "api_key_env": "DASHSCOPE_API_KEY",
+      "base_url": null,
+      "enable_thinking": false,
+      "thinking_budget": null,
+      "result_format": "message"
+    },
+    "legacy_openai": {
+      "api_key_env": "OPENAI_API_KEY",
+      "base_url": null
+    }
+  },
+  "models": {
+    "qwen-plus": {
+      "api_model_name": "qwen-plus",
+      "tokenizer_name_or_alias": "cl100k_base",
+      "context_length": 997952
+    },
+    "qwen-plus-snapshot-logprobs": {
+      "api_model_name": "qwen-plus-2025-12-01",
+      "supports_logprobs": true
+    }
+  }
+}

@@ -9,11 +9,7 @@ from darts.datasets import (
     WineDataset
 )
 
-import os
-import openai
-openai.api_key = os.environ['OPENAI_API_KEY']
 from models.llmtime import get_llmtime_predictions_data
-from models.llms import nll_fns
 from data.serialize import SerializerSettings
 from data.synthetic import get_synthetic_datasets
 
