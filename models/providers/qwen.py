@@ -143,7 +143,7 @@ class QwenProvider(BaseProvider):
         raise ProviderCapabilityError(
             "Model '%s' uses the Qwen-native DashScope provider, but LLMTime NLL/autotune "
             "requires teacher-forced token scores over the supplied prompt+target sequence. "
-            "DashScope's native logprobs only cover generated output tokens, so `supports_nll` "
-            "and `supports_autotune` stay disabled for the main Qwen path."
+            "DashScope's native logprobs only cover generated output tokens, so `supports_nll_scoring=False` "
+            "and exact_nll_autotune is unavailable on the main Qwen path. Use autotune_mode='validation_metric' instead."
             % spec.logical_model_name
         )

@@ -23,8 +23,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=False,
-            supports_nll=False,
-            supports_autotune=False,
+            supports_nll_scoring=False,
+            supports_autotune_nll=False,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="validation_metric",
+            supported_autotune_modes=("validation_metric", "disabled"),
             supports_reasoning=True,
             supports_chat=True,
             supports_text_completion_like_mode=True,
@@ -44,8 +47,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=False,
-            supports_nll=False,
-            supports_autotune=False,
+            supports_nll_scoring=False,
+            supports_autotune_nll=False,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="validation_metric",
+            supported_autotune_modes=("validation_metric", "disabled"),
             supports_reasoning=True,
             supports_chat=True,
             supports_text_completion_like_mode=True,
@@ -68,8 +74,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=True,
-            supports_nll=False,
-            supports_autotune=False,
+            supports_nll_scoring=False,
+            supports_autotune_nll=False,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="validation_metric",
+            supported_autotune_modes=("validation_metric", "disabled"),
             supports_reasoning=True,
             supports_chat=True,
             supports_text_completion_like_mode=True,
@@ -94,8 +103,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=False,
-            supports_nll=False,
-            supports_autotune=False,
+            supports_nll_scoring=False,
+            supports_autotune_nll=False,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="validation_metric",
+            supported_autotune_modes=("validation_metric", "disabled"),
             supports_reasoning=True,
             supports_chat=True,
             supports_text_completion_like_mode=True,
@@ -115,8 +127,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=True,
-            supports_nll=True,
-            supports_autotune=True,
+            supports_nll_scoring=True,
+            supports_autotune_nll=True,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="nll",
+            supported_autotune_modes=("nll", "validation_metric", "disabled"),
             supports_reasoning=False,
             supports_chat=False,
             supports_text_completion_like_mode=True,
@@ -134,8 +149,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=True,
-            supports_nll=True,
-            supports_autotune=True,
+            supports_nll_scoring=True,
+            supports_autotune_nll=True,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="nll",
+            supported_autotune_modes=("nll", "validation_metric", "disabled"),
             supports_reasoning=False,
             supports_chat=False,
             supports_text_completion_like_mode=True,
@@ -153,8 +171,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=True,
             supports_logprobs=False,
-            supports_nll=False,
-            supports_autotune=False,
+            supports_nll_scoring=False,
+            supports_autotune_nll=False,
+            supports_autotune_validation_metric=True,
+            default_autotune_mode="validation_metric",
+            supported_autotune_modes=("validation_metric", "disabled"),
             supports_reasoning=False,
             supports_chat=True,
             supports_text_completion_like_mode=True,
@@ -173,8 +194,11 @@ _MODEL_SPECS = {
         capabilities=ModelCapabilities(
             supports_sampling=False,
             supports_logprobs=False,
-            supports_nll=False,
-            supports_autotune=False,
+            supports_nll_scoring=False,
+            supports_autotune_nll=False,
+            supports_autotune_validation_metric=False,
+            default_autotune_mode="disabled",
+            supported_autotune_modes=("disabled",),
             supports_reasoning=False,
             supports_chat=False,
             supports_text_completion_like_mode=True,
@@ -182,6 +206,24 @@ _MODEL_SPECS = {
         ),
     ),
 }
+
+
+def _normalize_capability_overrides(override):
+    normalized = dict(override)
+    if "supports_nll" in normalized and "supports_nll_scoring" not in normalized:
+        normalized["supports_nll_scoring"] = normalized.pop("supports_nll")
+    if "supports_autotune" in normalized:
+        value = normalized.pop("supports_autotune")
+        normalized.setdefault("supports_autotune_nll", value)
+        normalized.setdefault("supports_autotune_validation_metric", value)
+        if value and "supported_autotune_modes" not in normalized:
+            normalized["supported_autotune_modes"] = ("nll", "validation_metric", "disabled")
+            normalized.setdefault("default_autotune_mode", "nll")
+        elif not value and "supported_autotune_modes" not in normalized:
+            normalized["supported_autotune_modes"] = ("disabled",)
+            normalized.setdefault("default_autotune_mode", "disabled")
+    return normalized
+
 
 
 def _apply_overrides(spec, override):
@@ -192,21 +234,27 @@ def _apply_overrides(spec, override):
     capability_keys = {
         "supports_sampling",
         "supports_logprobs",
-        "supports_nll",
-        "supports_autotune",
+        "supports_nll_scoring",
+        "supports_autotune_nll",
+        "supports_autotune_validation_metric",
+        "default_autotune_mode",
+        "supported_autotune_modes",
         "supports_reasoning",
         "supports_chat",
         "supports_text_completion_like_mode",
         "supports_logit_bias",
     }
     capability_update = {}
-    override = dict(override)
+    override = _normalize_capability_overrides(override)
     for key in list(override.keys()):
         if key in capability_keys:
             capability_update[key] = override.pop(key)
     if "capabilities" in override:
-        capability_update.update(override.pop("capabilities"))
+        nested_capabilities = _normalize_capability_overrides(override.pop("capabilities"))
+        capability_update.update(nested_capabilities)
     if capability_update:
+        if "supported_autotune_modes" in capability_update:
+            capability_update["supported_autotune_modes"] = tuple(capability_update["supported_autotune_modes"])
         capabilities = replace(capabilities, **capability_update)
 
     if "tokenizer_alias" in override and "tokenizer_name_or_alias" not in override:
@@ -223,9 +271,11 @@ def _apply_overrides(spec, override):
     return replace(spec, **override)
 
 
+
 def register_model_spec(spec):
     _MODEL_SPECS[spec.logical_model_name] = spec
     return spec
+
 
 
 def configure_model(logical_model_name, **kwargs):
@@ -248,6 +298,7 @@ def configure_model(logical_model_name, **kwargs):
     return spec
 
 
+
 def get_model_spec(logical_model_name):
     if logical_model_name not in _MODEL_SPECS:
         raise KeyError(
@@ -258,12 +309,25 @@ def get_model_spec(logical_model_name):
     return _apply_overrides(_MODEL_SPECS[logical_model_name], override)
 
 
+
 def get_model_capabilities(logical_model_name):
     return get_model_spec(logical_model_name).capabilities
 
 
+
+def get_supported_autotune_modes(logical_model_name):
+    return get_model_capabilities(logical_model_name).supported_autotune_modes
+
+
+
+def get_default_autotune_mode(logical_model_name):
+    return get_model_capabilities(logical_model_name).default_autotune_mode
+
+
+
 def list_model_specs():
     return [get_model_spec(name) for name in sorted(_MODEL_SPECS)]
+
 
 
 def get_resolved_default_model():

@@ -1,4 +1,5 @@
 from functools import partial
+import re
 import numpy as np
 from dataclasses import dataclass
 
@@ -156,7 +157,49 @@ def serialize_arr(arr, settings: SerializerSettings):
     bit_str += settings.time_sep # otherwise there is ambiguity in number of digits in the last time step
     return bit_str
 
-def deserialize_str(bit_str, settings: SerializerSettings, ignore_last=False, steps=None):
+def _recover_whitespace_delimited_sequence(orig_bitstring, settings: SerializerSettings, ignore_last=False, steps=None):
+    normalized = (orig_bitstring or '').strip()
+    if not normalized:
+        return None
+    if settings.time_sep and settings.time_sep in normalized:
+        return None
+    if ',' in normalized:
+        return None
+    tokens = normalized.split()
+    if len(tokens) <= 1:
+        return None
+    if not all(re.fullmatch(r'-?\d+', token) for token in tokens):
+        return None
+    if ignore_last:
+        tokens = tokens[:-1]
+    if steps is not None:
+        tokens = tokens[:steps]
+    if not tokens:
+        return None
+
+    sign_arr = []
+    digits_arr = []
+    for token in tokens:
+        sign = -1 if token.startswith('-') else 1
+        digit_chars = token[1:] if token.startswith('-') else token
+        if not digit_chars:
+            return None
+        sign_arr.append(sign)
+        digits_arr.append([int(ch) for ch in digit_chars])
+
+    max_len = max(len(digits) for digits in digits_arr)
+    padded_digits = [([0] * (max_len - len(digits)) + digits) for digits in digits_arr]
+    vrepr2num = partial(
+        vec_repr2num,
+        base=settings.base,
+        prec=settings.prec,
+        half_bin_correction=settings.half_bin_correction,
+    )
+    return vrepr2num(np.array(sign_arr), np.array(padded_digits))
+
+
+
+def deserialize_str(bit_str, settings: SerializerSettings, ignore_last=False, steps=None, allow_whitespace_recovery=True):
     """
     Deserialize a string into an array of numbers (a time series) based on the provided settings.
 
@@ -195,7 +238,23 @@ def deserialize_str(bit_str, settings: SerializerSettings, ignore_last=False, st
             if settings.bit_sep=='':
                 bits = [b for b in bit_str.lstrip()]
             else:
-                bits = [b[:1] for b in bit_str.lstrip().split(settings.bit_sep)]
+                raw_tokens = [token for token in bit_str.lstrip().split(settings.bit_sep) if token]
+                bits = []
+                for token in raw_tokens:
+                    if settings.decimal_point and token == settings.decimal_point:
+                        bits.append(token)
+                    elif all(ch.isdigit() for ch in token):
+                        # Qwen sometimes emits compact digits like `1249` instead of `1 2 4 9`.
+                        # Treat both forms as the same serialized number.
+                        bits.extend(list(token))
+                    else:
+                        for ch in token:
+                            if settings.decimal_point and ch == settings.decimal_point:
+                                bits.append(ch)
+                            elif ch.isdigit():
+                                bits.append(ch)
+                            else:
+                                break
             if settings.fixed_length:
                 assert len(bits) == max_bit_pos+settings.prec, f"fixed length bit_str must have {max_bit_pos+settings.prec} bits, but has {len(bits)}: '{bit_str}'"
             digits = []
@@ -215,12 +274,22 @@ def deserialize_str(bit_str, settings: SerializerSettings, ignore_last=False, st
         print(f'Got {orig_bitstring}')
         print(f"Bitstr {bit_str}, separator {settings.bit_sep}")
         # At this point, we have already deserialized some of the bit_strs, so we return those below
+    recovered = None
+    should_try_recovery = allow_whitespace_recovery and (len(digits_arr) <= 1) and (steps is None or steps > 1)
+    if should_try_recovery:
+        recovered = _recover_whitespace_delimited_sequence(
+            orig_bitstring,
+            settings,
+            ignore_last=ignore_last,
+            steps=steps,
+        )
+        if recovered is not None and len(recovered) > len(digits_arr):
+            return recovered
+
     if digits_arr:
         # add leading zeros to get to equal lengths
         max_len = max([len(d) for d in digits_arr])
         for i in range(len(digits_arr)):
             digits_arr[i] = [0]*(max_len-len(digits_arr[i])) + digits_arr[i]
         return vrepr2num(np.array(sign_arr), np.array(digits_arr))
-    else:
-        # errored at first step
-        return None
+    return None

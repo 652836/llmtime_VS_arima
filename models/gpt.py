@@ -19,7 +19,7 @@ from models.tokenization import tokenize_text
 _CHAT_COMPLETION_INSTRUCTION = (
     "Continue the following numeric time series. "
     "Return only the continuation as serialized numbers and separators, "
-    "with no commentary or surrounding text.\n\nSequence:\n"
+    "with no commentary or surrounding text.\n\n"
 )
 
 
@@ -44,9 +44,18 @@ def get_allowed_ids(strs, model):
 
 
 
-def _prepare_prompt(spec, input_str):
+def _prepare_prompt(spec, input_str, steps):
     if spec.mode == "chat":
-        return _CHAT_COMPLETION_INSTRUCTION + input_str
+        return (
+            _CHAT_COMPLETION_INSTRUCTION
+            + "Rules:\n"
+            + f"- Output exactly {steps} additional values.\n"
+            + "- Do not repeat the original history.\n"
+            + "- Keep the same numeric serialization style and separators.\n"
+            + "- Stop immediately after the last requested value.\n\n"
+            + "History:\n"
+            + input_str
+        )
     return input_str
 
 
@@ -56,10 +65,34 @@ def _system_prompt(spec):
 
 
 
+def _count_serialized_steps(serialized, settings):
+    trimmed = serialized
+    if settings.time_sep:
+        while trimmed.endswith(settings.time_sep):
+            trimmed = trimmed[: -len(settings.time_sep)]
+    if not trimmed:
+        return 1
+    return max(1, len([chunk for chunk in trimmed.split(settings.time_sep) if chunk]))
+
+
+
+def _estimate_generation_budget(spec, input_str, steps, settings):
+    num_steps = _count_serialized_steps(input_str, settings)
+    try:
+        token_count = len(tokenize_text(input_str, tokenizer_name_or_alias=spec.tokenizer_name_or_alias))
+    except Exception:
+        token_count = len(input_str)
+    avg_tokens_per_step = max(1.0, token_count / max(1, num_steps))
+    margin = 1.8 if spec.mode == "chat" else 1.4
+    return max(8, int(np.ceil(avg_tokens_per_step * steps * margin)))
+
+
+
 def gpt_completion_fn(model, input_str, steps, settings, num_samples, temp, top_p=None, stop=None, **kwargs):
     spec = get_model_spec(model)
     provider = get_provider(spec.provider)
-    avg_tokens_per_step = max(1, len(input_str) / max(1, len(input_str.split(settings.time_sep))))
+    explicit_max_new_tokens = kwargs.pop("max_new_tokens", None)
+    max_new_tokens = int(explicit_max_new_tokens) if explicit_max_new_tokens is not None else _estimate_generation_budget(spec, input_str, steps, settings)
 
     allowed_tokens = [settings.bit_sep + str(i) for i in range(settings.base)]
     allowed_tokens += [settings.time_sep, settings.plus_sign, settings.minus_sign]
@@ -70,10 +103,10 @@ def gpt_completion_fn(model, input_str, steps, settings, num_samples, temp, top_
         logit_bias = {token_id: 30 for token_id in get_allowed_ids(allowed_tokens, model)}
         extra_body["logit_bias"] = logit_bias
 
-    prompt = _prepare_prompt(spec, input_str)
+    prompt = _prepare_prompt(spec, input_str, steps)
     request = GenerationRequest(
         prompt=prompt,
-        max_new_tokens=max(1, int(avg_tokens_per_step * steps)),
+        max_new_tokens=max_new_tokens,
         temperature=temp,
         num_samples=num_samples,
         top_p=top_p,
@@ -97,9 +130,9 @@ def score_text(model, prompt, temp, logprobs=5):
 
 def gpt_nll_fn(model, input_arr, target_arr, settings: SerializerSettings, transform, count_seps=True, temp=1):
     spec = get_model_spec(model)
-    if not spec.capabilities.supports_nll:
+    if not spec.capabilities.supports_nll_scoring:
         raise NotImplementedError(
-            "Model '%s' (provider=%s) does not support teacher-forced NLL scoring in the current setup."
+            "Model '%s' (provider=%s) does not support teacher-forced NLL scoring in the current setup. Use a provider/model with supports_nll_scoring=True for exact_nll_autotune."
             % (model, spec.provider)
         )
 

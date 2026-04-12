@@ -1,18 +1,32 @@
 ﻿from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 @dataclass(frozen=True)
 class ModelCapabilities:
     supports_sampling: bool = True
     supports_logprobs: bool = False
-    supports_nll: bool = False
-    supports_autotune: bool = False
+    supports_nll_scoring: bool = False
+    supports_autotune_nll: bool = False
+    supports_autotune_validation_metric: bool = False
+    default_autotune_mode: str = "disabled"
+    supported_autotune_modes: Tuple[str, ...] = ("disabled",)
     supports_reasoning: bool = False
     supports_chat: bool = True
     supports_text_completion_like_mode: bool = False
     supports_logit_bias: bool = False
+
+    @property
+    def supports_nll(self):
+        return self.supports_nll_scoring
+
+    @property
+    def supports_autotune(self):
+        return any(mode != "disabled" for mode in self.supported_autotune_modes)
+
+    def supports_autotune_mode(self, mode):
+        return mode in self.supported_autotune_modes
 
 
 @dataclass(frozen=True)

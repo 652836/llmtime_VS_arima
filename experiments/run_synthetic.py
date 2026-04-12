@@ -1,4 +1,11 @@
-﻿import os
+import os
+import sys
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
+
+import os
 import pickle
 
 from data.synthetic import get_synthetic_datasets
@@ -8,7 +15,14 @@ from models.gaussian_process import get_gp_predictions_data
 from models.llmtime import get_llmtime_predictions_data
 from models.utils import grid_iter
 from models.validation_likelihood_tuning import get_autotuned_predictions_data
-from experiments.model_defaults import DEFAULT_REMOTE_MODEL, QWEN_LLMTIME_HYPERS, is_remote_model
+from experiments.model_defaults import DEFAULT_LLMTIME_HYPERS, DEFAULT_REMOTE_MODEL, is_remote_model
+from experiments.runtime_filters import (
+    get_local_num_samples,
+    get_output_dir,
+    get_remote_num_samples,
+    select_named_items,
+    select_names,
+)
 
 
 gp_hypers = dict(lr=[1e-2])
@@ -23,7 +37,7 @@ model_hypers = {
     "TCN": TCN_hypers,
     "N-BEATS": NBEATS_hypers,
     "N-HiTS": NHITS_hypers,
-    DEFAULT_REMOTE_MODEL: dict(QWEN_LLMTIME_HYPERS),
+    DEFAULT_REMOTE_MODEL: dict(DEFAULT_LLMTIME_HYPERS),
 }
 
 model_predict_fns = {
@@ -35,36 +49,46 @@ model_predict_fns = {
     DEFAULT_REMOTE_MODEL: get_llmtime_predictions_data,
 }
 
-output_dir = 'outputs/synthetic'
+output_dir = get_output_dir('outputs/synthetic')
 os.makedirs(output_dir, exist_ok=True)
 
-datasets = get_synthetic_datasets()
-for dsname, data in datasets.items():
-    if dsname in ['rbf_0', 'rbf_1', 'matern_0', 'matern_1']:
-        continue
+datasets = [(name, data) for name, data in get_synthetic_datasets().items() if name not in ['rbf_0', 'rbf_1', 'matern_0', 'matern_1']]
+datasets = select_named_items(dict(datasets))
+models_to_run = select_names([DEFAULT_REMOTE_MODEL, 'arima', 'TCN'], filter_env='LLMTIME_MODEL_FILTER')
+for dsname, data in datasets:
     train, test = data
-    if os.path.exists(f'{output_dir}/{dsname}.pkl'):
-        with open(f'{output_dir}/{dsname}.pkl', 'rb') as handle:
+    output_path = f'{output_dir}/{dsname}.pkl'
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    if os.path.exists(output_path):
+        with open(output_path, 'rb') as handle:
             out_dict = pickle.load(handle)
     else:
         out_dict = {}
 
-    for model in [DEFAULT_REMOTE_MODEL, 'arima', 'TCN']:
+    for model in models_to_run:
         if model in out_dict:
             print(f'Skipping {dsname} {model}')
             continue
         print(f'Starting {dsname} {model}')
         hypers = list(grid_iter(model_hypers[model]))
-        parallel = True if is_remote_model(model) else False
-        num_samples = 20 if is_remote_model(model) else 100
+        parallel = is_remote_model(model)
+        num_samples = get_remote_num_samples(20) if is_remote_model(model) else get_local_num_samples(100)
         try:
-            preds = get_autotuned_predictions_data(train, test, hypers, num_samples, model_predict_fns[model], verbose=False, parallel=parallel)
+            preds = get_autotuned_predictions_data(
+                train,
+                test,
+                hypers,
+                num_samples,
+                model_predict_fns[model],
+                verbose=False,
+                parallel=parallel,
+            )
             out_dict[model] = preds
         except Exception as exc:
             print(f'Failed {dsname} {model}')
             print(exc)
             continue
-        with open(f'{output_dir}/{dsname}.pkl', 'wb') as handle:
+        with open(output_path, 'wb') as handle:
             pickle.dump(out_dict, handle)
 
     print(f'Finished {dsname}')

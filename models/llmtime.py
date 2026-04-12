@@ -8,6 +8,7 @@ from tqdm import tqdm
 from data.serialize import SerializerSettings, deserialize_str, serialize_arr
 from models.llms import get_completion_fn, get_context_length, get_nll_fn, get_tokenization_fn
 from models.model_registry import get_resolved_default_model, get_model_spec
+from models.validation_likelihood_tuning import strip_autotune_kwargs
 
 
 @dataclass
@@ -80,6 +81,19 @@ def handle_prediction(pred, expected_length, strict=False):
 
 
 
+def is_reasonable_serialized_prediction(pred, settings):
+    if pred is None:
+        return False
+    arr = np.asarray(pred, dtype=float).reshape(-1)
+    if arr.size == 0:
+        return False
+    finite = arr[np.isfinite(arr)]
+    if finite.size == 0:
+        return False
+    return bool(np.all(np.abs(finite) <= settings.max_val))
+
+
+
 def generate_predictions(
     completion_fn,
     input_strs,
@@ -90,18 +104,24 @@ def generate_predictions(
     temp=0.7,
     parallel=True,
     strict_handling=False,
+    retry_on_short=True,
+    retry_max_new_tokens=None,
+    max_retries_on_short=2,
     **kwargs,
 ):
     completions_list = []
 
-    def complete(serialized_input):
+    def complete(serialized_input, max_new_tokens_override=None, steps_override=None):
+        call_kwargs = dict(kwargs)
+        if max_new_tokens_override is not None:
+            call_kwargs["max_new_tokens"] = max_new_tokens_override
         return completion_fn(
             input_str=serialized_input,
-            steps=steps,
+            steps=steps if steps_override is None else steps_override,
             settings=settings,
             num_samples=num_samples,
             temp=temp,
-            **kwargs,
+            **call_kwargs,
         )
 
     if parallel and len(input_strs) > 1:
@@ -111,21 +131,81 @@ def generate_predictions(
     else:
         completions_list = [complete(input_str) for input_str in tqdm(input_strs)]
 
-    def completion_to_pred(completion, inv_transform):
-        pred = handle_prediction(
-            deserialize_str(completion, settings, ignore_last=False, steps=steps),
-            expected_length=steps,
-            strict=strict_handling,
-        )
-        if pred is not None:
-            return inv_transform(pred)
-        return None
+    default_retry_max_new_tokens = retry_max_new_tokens
+    if default_retry_max_new_tokens is None:
+        provided_budget = kwargs.get("max_new_tokens")
+        if provided_budget is not None:
+            default_retry_max_new_tokens = max(int(provided_budget) * 2, int(provided_budget) + 128)
+        else:
+            default_retry_max_new_tokens = max(256, steps * 32)
 
-    preds = [
-        [completion_to_pred(completion, scaler.inv_transform) for completion in completions]
-        for completions, scaler in zip(completions_list, scalers)
-    ]
-    return preds, completions_list, input_strs
+    preds = []
+    adjusted_completions_list = []
+    for input_str, completions, scaler in zip(input_strs, completions_list, scalers):
+        series_preds = []
+        series_completions = list(completions)
+        for idx, completion in enumerate(series_completions):
+            deserialized = deserialize_str(completion, settings, ignore_last=False, steps=steps)
+            best_completion = completion
+            best_deserialized = deserialized
+            best_len = 0 if deserialized is None else len(deserialized)
+            if retry_on_short and best_len < steps:
+                accumulated = best_deserialized if is_reasonable_serialized_prediction(best_deserialized, settings) else None
+                for retry_idx in range(max_retries_on_short):
+                    print(
+                        "Retrying short completion %d < %d with max_new_tokens=%d (attempt %d/%d)"
+                        % (best_len, steps, default_retry_max_new_tokens, retry_idx + 1, max_retries_on_short)
+                    )
+                    if accumulated is not None and len(accumulated) > 0:
+                        continued_input = input_str + serialize_arr(accumulated, settings)
+                        remaining_steps = steps - len(accumulated)
+                    else:
+                        continued_input = input_str
+                        remaining_steps = steps
+                    retry_completion = complete(
+                        continued_input,
+                        max_new_tokens_override=default_retry_max_new_tokens,
+                        steps_override=remaining_steps,
+                    )[0]
+                    retry_deserialized = deserialize_str(
+                        retry_completion,
+                        settings,
+                        ignore_last=False,
+                        steps=remaining_steps,
+                    )
+                    retry_len = 0 if retry_deserialized is None else len(retry_deserialized)
+                    if retry_len > 0 and is_reasonable_serialized_prediction(retry_deserialized, settings):
+                        if accumulated is not None and len(accumulated) > 0:
+                            candidate_accumulated = np.concatenate([accumulated, retry_deserialized])
+                        else:
+                            candidate_accumulated = retry_deserialized
+                        if is_reasonable_serialized_prediction(candidate_accumulated, settings):
+                            accumulated = candidate_accumulated
+                            best_deserialized = accumulated
+                            best_len = len(best_deserialized)
+                            best_completion = serialize_arr(best_deserialized, settings)
+                            if settings.time_sep and best_completion.endswith(settings.time_sep):
+                                best_completion = best_completion[: -len(settings.time_sep)]
+                        else:
+                            accumulated = None
+                    else:
+                        accumulated = accumulated if is_reasonable_serialized_prediction(accumulated, settings) else None
+                    if best_len >= steps:
+                        break
+                completion = best_completion
+                deserialized = best_deserialized
+                series_completions[idx] = best_completion
+            pred = handle_prediction(
+                deserialized,
+                expected_length=steps,
+                strict=strict_handling,
+            )
+            if pred is not None:
+                pred = scaler.inv_transform(pred)
+            series_preds.append(pred)
+        preds.append(series_preds)
+        adjusted_completions_list.append(series_completions)
+    return preds, adjusted_completions_list, input_strs
 
 
 
@@ -147,6 +227,7 @@ def get_llmtime_predictions_data(
     spec = get_model_spec(model)
     completion_fn = get_completion_fn(model)
     nll_fn = get_nll_fn(model)
+    kwargs = strip_autotune_kwargs(kwargs)
 
     if settings is None:
         settings = SerializerSettings(base=10, prec=3, signed=True, half_bin_correction=True)
@@ -186,9 +267,11 @@ def get_llmtime_predictions_data(
     if num_samples <= 0 and not compute_nll:
         raise ValueError(
             "Sampling-only mode requires num_samples > 0. "
-            "If you need autotune/NLL, use a provider/model with teacher-forced scoring support."
+            "If you need exact NLL scoring, choose a model with supports_nll_scoring=True."
         )
 
+    raw_prediction_lengths = None
+    has_short_prediction = False
     if num_samples > 0:
         preds, completions_list, input_strs = generate_predictions(
             completion_fn,
@@ -201,6 +284,14 @@ def get_llmtime_predictions_data(
             parallel=parallel,
             **kwargs,
         )
+        raw_prediction_lengths = []
+        for completions in completions_list:
+            series_lengths = []
+            for completion in completions:
+                deserialized = deserialize_str(completion, settings, ignore_last=False, steps=steps)
+                series_lengths.append(0 if deserialized is None else len(deserialized))
+            raw_prediction_lengths.append(series_lengths)
+        has_short_prediction = any(length < steps for lengths in raw_prediction_lengths for length in lengths)
         samples = [pd.DataFrame(preds[i], columns=test[i].index) for i in range(len(preds))]
         medians = [sample.median(axis=0) for sample in samples]
         samples = samples if len(samples) > 1 else samples[0]
@@ -213,8 +304,11 @@ def get_llmtime_predictions_data(
             "Method": model,
             "Provider": spec.provider,
             "APImodel": spec.api_model_name,
-            "SupportsNLL": spec.capabilities.supports_nll,
-            "SupportsAutotune": spec.capabilities.supports_autotune,
+            "SupportsNLLScoring": spec.capabilities.supports_nll_scoring,
+            "SupportedAutotuneModes": list(spec.capabilities.supported_autotune_modes),
+            "DefaultAutotuneMode": spec.capabilities.default_autotune_mode,
+            "RawPredictionLengths": raw_prediction_lengths,
+            "HasShortPrediction": has_short_prediction,
         },
         "completions_list": completions_list,
         "input_strs": input_strs,
@@ -223,10 +317,9 @@ def get_llmtime_predictions_data(
     if compute_nll:
         if nll_fn is None:
             raise NotImplementedError(
-                "Model '%s' (provider=%s, api_model=%s) does not support NLL/logprob scoring in the current setup. "
-                "For the default Qwen-native path this is expected: DashScope sampling works, but teacher-forced "
-                "prompt+target scoring is not exposed, so set compute_nll=False and use fixed hyperparameters instead "
-                "of validation autotune."
+                "Model '%s' (provider=%s, api_model=%s) does not support teacher-forced token-level scoring in the current setup. "
+                "If you asked for exact NLL or autotune_mode='nll', switch to a provider/model with supports_nll_scoring=True, "
+                "or use autotune_mode='validation_metric' for the default Qwen-native path."
                 % (model, spec.provider, spec.api_model_name)
             )
         bpds = [

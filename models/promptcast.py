@@ -10,6 +10,7 @@ from models.model_registry import get_model_spec, get_resolved_default_model
 from models.providers import get_provider
 from models.providers.base import GenerationRequest
 from models.tokenization import tokenize_text
+from models.validation_likelihood_tuning import strip_autotune_kwargs
 
 
 @dataclass
@@ -65,8 +66,15 @@ def get_token_ids(tokens, model):
 
 
 def get_avg_tokens_per_step(input_str, settings):
-    input_tokens = sum([1 + len(chunk) / 2 for chunk in input_str.split(settings.time_sep)])
-    input_steps = max(1, len(input_str.split(settings.time_sep)))
+    trimmed = input_str
+    if settings.time_sep:
+        while trimmed.endswith(settings.time_sep):
+            trimmed = trimmed[: -len(settings.time_sep)]
+    chunks = [chunk for chunk in trimmed.split(settings.time_sep) if chunk] if trimmed else []
+    if not chunks:
+        return 1
+    input_tokens = sum([1 + len(chunk) / 2 for chunk in chunks])
+    input_steps = max(1, len(chunks))
     return input_tokens / input_steps
 
 
@@ -237,12 +245,13 @@ def get_promptcast_predictions_data(
 ):
     model = model or get_resolved_default_model()
     spec = get_model_spec(model)
+    kwargs = strip_autotune_kwargs(kwargs)
     compute_nll = kwargs.pop("compute_nll", False)
     if compute_nll:
         raise NotImplementedError(
-            "PromptCast scoring/NLL has not been ported to the Qwen-native refactor. "
-            "The original implementation depended on completion-logprob semantics; the current PromptCast path "
-            "is sampling-only and should be run with compute_nll=False."
+            "PromptCast exact NLL scoring has not been ported to the refactor. "
+            "The original path depended on completion-style token logprobs; for Qwen and the current PromptCast mainline, "
+            "use autotune_mode='validation_metric' with compute_nll=False."
         )
 
     if settings is None:
@@ -321,6 +330,8 @@ def get_promptcast_predictions_data(
             "Provider": spec.provider,
             "APImodel": spec.api_model_name,
             "PromptCastScoring": "sampling_only",
+            "SupportedAutotuneModes": list(spec.capabilities.supported_autotune_modes),
+            "DefaultAutotuneMode": spec.capabilities.default_autotune_mode,
         },
         "completions_list": completions_list,
         "input_strs": input_strs,

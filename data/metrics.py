@@ -23,6 +23,28 @@ def calculate_crps(target, pred, num_quantiles=20):
 
 
 
+def compute_point_forecast_metric(target, pred, metric="mae"):
+    target_arr = np.asarray(target, dtype=float)
+    pred_arr = np.asarray(pred, dtype=float)
+    if target_arr.shape != pred_arr.shape:
+        raise ValueError(
+            "Validation metric expects matching shapes, got target=%r pred=%r"
+            % (target_arr.shape, pred_arr.shape)
+        )
+
+    metric = metric.lower()
+    if metric == "mae":
+        return float(np.mean(np.abs(pred_arr - target_arr)))
+    if metric == "mse":
+        return float(np.mean((pred_arr - target_arr) ** 2))
+    if metric == "smape":
+        denominator = np.abs(target_arr) + np.abs(pred_arr)
+        denominator = np.where(denominator == 0, 1.0, denominator)
+        return float(np.mean(200.0 * np.abs(pred_arr - target_arr) / denominator))
+    raise ValueError("Unsupported validation metric %r. Expected one of: mae, mse, smape." % metric)
+
+
+
 def nll(input_arr, target_arr, model, settings: SerializerSettings, transform, count_seps=True, prompt=None, temp=1):
     nll_fn = get_nll_fn(model)
     if nll_fn is None:

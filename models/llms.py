@@ -64,7 +64,7 @@ def get_nll_fn(model):
         return _LEGACY_LLAMA_NLL[model]
 
     capabilities = get_model_capabilities(model)
-    if capabilities.supports_nll:
+    if capabilities.supports_nll_scoring:
         return partial(gpt_nll_fn, model=model)
     return None
 
