@@ -1,0 +1,12 @@
+cd /d E:\llm
+git clone --branch llmtime-qwen-native --single-branch https://github.com/652836/llmtime_VS_arima.git
+
+cd llmtime_VS_arima
+conda create -n llmtime_qwen python=3.9 -y
+conda activate llmtime_qwen
+python -m pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+pip install jupyter notebook ipykernel
+
+python -m ipykernel install --user --name llmtime_qwen --display-name "Python (llmtime_qwen)"
+jupyter notebook --notebookdir=E:\llm\llmtime_VS_arima
