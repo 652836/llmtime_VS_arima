@@ -200,6 +200,14 @@ def describe_runtime():
         "request_timeout_seconds": config.get("request_timeout_seconds"),
         "providers": {},
     }
+    try:
+        from models.model_registry import get_model_spec
+
+        default_spec = get_model_spec(summary["default_model"])
+        summary["default_model_api_name"] = default_spec.api_model_name
+        summary["default_model_provider"] = default_spec.provider
+    except Exception:
+        pass
     for provider_name in sorted(config.get("providers", {})):
         provider_config = get_provider_config(provider_name)
         summary["providers"][provider_name] = {

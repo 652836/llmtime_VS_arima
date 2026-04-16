@@ -1,4 +1,4 @@
-﻿from dataclasses import replace
+from dataclasses import replace
 
 from configs.runtime import get_default_model, get_model_override
 from models.providers.base import ModelCapabilities, ModelSpec
@@ -11,110 +11,184 @@ DEFAULT_TIME_SERIES_SYSTEM_PROMPT = (
 )
 
 
+_DASHSCOPE_CAPABILITIES = ModelCapabilities(
+    supports_sampling=True,
+    supports_logprobs=False,
+    supports_nll_scoring=False,
+    supports_autotune_nll=False,
+    supports_autotune_validation_metric=True,
+    default_autotune_mode="validation_metric",
+    supported_autotune_modes=("validation_metric", "disabled"),
+    supports_reasoning=True,
+    supports_chat=True,
+    supports_text_completion_like_mode=True,
+    supports_logit_bias=False,
+)
+
+
+def _dashscope_generation_spec(
+    logical_model_name,
+    api_model_name=None,
+    *,
+    context_length=None,
+    tokenizer_name_or_alias="cl100k_base",
+    supports_logprobs=False,
+    supports_reasoning=True,
+    description="",
+):
+    capabilities = replace(
+        _DASHSCOPE_CAPABILITIES,
+        supports_logprobs=supports_logprobs,
+        supports_reasoning=supports_reasoning,
+    )
+    extra_generation_defaults = {
+        "result_format": "message",
+        "enable_thinking": False,
+    }
+    if supports_logprobs:
+        extra_generation_defaults.update({"logprobs": True, "top_logprobs": 5})
+    return ModelSpec(
+        logical_model_name=logical_model_name,
+        provider="qwen",
+        api_model_name=api_model_name or logical_model_name,
+        tokenizer_name_or_alias=tokenizer_name_or_alias,
+        context_length=context_length,
+        mode="chat",
+        description=description,
+        capabilities=capabilities,
+        extra_generation_defaults=extra_generation_defaults,
+        provider_options={"system_prompt": DEFAULT_TIME_SERIES_SYSTEM_PROMPT},
+    )
+
+
 _MODEL_SPECS = {
-    "qwen-plus": ModelSpec(
-        logical_model_name="qwen-plus",
-        provider="qwen",
-        api_model_name="qwen-plus",
-        tokenizer_name_or_alias="cl100k_base",
+    "qwen-plus": _dashscope_generation_spec(
+        "qwen-plus",
         context_length=997952,
-        mode="chat",
         description="Default Qwen-native forecasting model via DashScope.",
-        capabilities=ModelCapabilities(
-            supports_sampling=True,
-            supports_logprobs=False,
-            supports_nll_scoring=False,
-            supports_autotune_nll=False,
-            supports_autotune_validation_metric=True,
-            default_autotune_mode="validation_metric",
-            supported_autotune_modes=("validation_metric", "disabled"),
-            supports_reasoning=True,
-            supports_chat=True,
-            supports_text_completion_like_mode=True,
-            supports_logit_bias=False,
-        ),
-        extra_generation_defaults={"result_format": "message", "enable_thinking": False},
-        provider_options={"system_prompt": DEFAULT_TIME_SERIES_SYSTEM_PROMPT},
     ),
-    "qwen-plus-latest": ModelSpec(
-        logical_model_name="qwen-plus-latest",
-        provider="qwen",
-        api_model_name="qwen-plus-latest",
-        tokenizer_name_or_alias="cl100k_base",
+    "qwen-plus-latest": _dashscope_generation_spec(
+        "qwen-plus-latest",
         context_length=997952,
-        mode="chat",
         description="Latest Qwen Plus alias via DashScope. Defaults to non-thinking mode.",
-        capabilities=ModelCapabilities(
-            supports_sampling=True,
-            supports_logprobs=False,
-            supports_nll_scoring=False,
-            supports_autotune_nll=False,
-            supports_autotune_validation_metric=True,
-            default_autotune_mode="validation_metric",
-            supported_autotune_modes=("validation_metric", "disabled"),
-            supports_reasoning=True,
-            supports_chat=True,
-            supports_text_completion_like_mode=True,
-            supports_logit_bias=False,
-        ),
-        extra_generation_defaults={"result_format": "message", "enable_thinking": False},
-        provider_options={"system_prompt": DEFAULT_TIME_SERIES_SYSTEM_PROMPT},
     ),
-    "qwen-plus-snapshot-logprobs": ModelSpec(
-        logical_model_name="qwen-plus-snapshot-logprobs",
-        provider="qwen",
-        api_model_name="qwen-plus-2025-12-01",
-        tokenizer_name_or_alias="cl100k_base",
+    "qwen-plus-2025-07-28": _dashscope_generation_spec(
+        "qwen-plus-2025-07-28",
         context_length=997952,
-        mode="chat",
+        description="Pinned Qwen Plus snapshot for reproducible notebook and experiment runs.",
+    ),
+    "qwen-plus-2025-12-01": _dashscope_generation_spec(
+        "qwen-plus-2025-12-01",
+        context_length=997952,
+        description="Pinned Qwen Plus snapshot exposed as a direct model code.",
+    ),
+    "qwen-plus-snapshot-logprobs": _dashscope_generation_spec(
+        "qwen-plus-snapshot-logprobs",
+        api_model_name="qwen-plus-2025-12-01",
+        context_length=997952,
+        supports_logprobs=True,
         description=(
             "Snapshot Qwen Plus route for optional output-token logprobs. "
             "Teacher-forced NLL/autotune still remain disabled."
         ),
-        capabilities=ModelCapabilities(
-            supports_sampling=True,
-            supports_logprobs=True,
-            supports_nll_scoring=False,
-            supports_autotune_nll=False,
-            supports_autotune_validation_metric=True,
-            default_autotune_mode="validation_metric",
-            supported_autotune_modes=("validation_metric", "disabled"),
-            supports_reasoning=True,
-            supports_chat=True,
-            supports_text_completion_like_mode=True,
-            supports_logit_bias=False,
-        ),
-        extra_generation_defaults={
-            "result_format": "message",
-            "enable_thinking": False,
-            "logprobs": True,
-            "top_logprobs": 5,
-        },
-        provider_options={"system_prompt": DEFAULT_TIME_SERIES_SYSTEM_PROMPT},
     ),
-    "qwen3.6-plus": ModelSpec(
-        logical_model_name="qwen3.6-plus",
-        provider="qwen",
-        api_model_name="qwen3.6-plus",
-        tokenizer_name_or_alias="cl100k_base",
+    "qwen3.6-plus": _dashscope_generation_spec(
+        "qwen3.6-plus",
         context_length=991808,
-        mode="chat",
         description="Explicit Qwen3.6 Plus route with thinking disabled for numeric forecasting.",
-        capabilities=ModelCapabilities(
-            supports_sampling=True,
-            supports_logprobs=False,
-            supports_nll_scoring=False,
-            supports_autotune_nll=False,
-            supports_autotune_validation_metric=True,
-            default_autotune_mode="validation_metric",
-            supported_autotune_modes=("validation_metric", "disabled"),
-            supports_reasoning=True,
-            supports_chat=True,
-            supports_text_completion_like_mode=True,
-            supports_logit_bias=False,
+    ),
+    "qwen-max": _dashscope_generation_spec(
+        "qwen-max",
+        description="Qwen Max via DashScope generation API.",
+    ),
+    "qvq-max-2025-03-25": _dashscope_generation_spec(
+        "qvq-max-2025-03-25",
+        description="QVQ Max reasoning model exposed through the DashScope generation interface.",
+    ),
+    "qwen-math-turbo": _dashscope_generation_spec(
+        "qwen-math-turbo",
+        description="Qwen Math Turbo model code from DashScope/Bailian.",
+    ),
+    "qwen-coder-turbo-0919": _dashscope_generation_spec(
+        "qwen-coder-turbo-0919",
+        description="Qwen Coder Turbo model code from DashScope/Bailian.",
+    ),
+    "qwen2.5-math-7b-instruct": _dashscope_generation_spec(
+        "qwen2.5-math-7b-instruct",
+        description="Qwen2.5 Math 7B Instruct model code from DashScope/Bailian.",
+    ),
+    "qwen2.5-14b-instruct": _dashscope_generation_spec(
+        "qwen2.5-14b-instruct",
+        description="Qwen2.5 14B Instruct model code from DashScope/Bailian.",
+    ),
+    "qwen2.5-7b-instruct": _dashscope_generation_spec(
+        "qwen2.5-7b-instruct",
+        description="Qwen2.5 7B Instruct model code from DashScope/Bailian.",
+    ),
+    "qwen3-32b": _dashscope_generation_spec(
+        "qwen3-32b",
+        description="Qwen3 32B model code from DashScope/Bailian.",
+    ),
+    "qwen-mt-flash": _dashscope_generation_spec(
+        "qwen-mt-flash",
+        description="Qwen MT Flash model code from DashScope/Bailian.",
+    ),
+    "deepseek-r1-distill-qwen-7b": _dashscope_generation_spec(
+        "deepseek-r1-distill-qwen-7b",
+        description="DeepSeek R1 Distill Qwen 7B model code routed through DashScope.",
+    ),
+    "glm-5": _dashscope_generation_spec(
+        "glm-5",
+        description="GLM-5 model code routed through DashScope generation API.",
+    ),
+    "qwen-vl-plus-2025-05-07": _dashscope_generation_spec(
+        "qwen-vl-plus-2025-05-07",
+        description=(
+            "Qwen VL Plus snapshot from DashScope/Bailian. The current forecasting pipeline sends text-only "
+            "messages, so multimodal abilities are not exercised."
         ),
-        extra_generation_defaults={"result_format": "message", "enable_thinking": False},
-        provider_options={"system_prompt": DEFAULT_TIME_SERIES_SYSTEM_PROMPT},
+    ),
+    "qwen-vl-plus-latest": _dashscope_generation_spec(
+        "qwen-vl-plus-latest",
+        description=(
+            "Latest Qwen VL Plus alias. The current forecasting pipeline sends text-only messages."
+        ),
+    ),
+    "qwen-vl-ocr-latest": _dashscope_generation_spec(
+        "qwen-vl-ocr-latest",
+        description=(
+            "Latest Qwen VL OCR alias. The current forecasting pipeline sends text-only messages."
+        ),
+    ),
+    "qwen2.5-vl-72b-instruct": _dashscope_generation_spec(
+        "qwen2.5-vl-72b-instruct",
+        description=(
+            "Qwen2.5 VL 72B Instruct model code. Registered for direct selection; current forecasting calls remain text-only."
+        ),
+    ),
+    "qwen2.5-vl-3b-instruct": _dashscope_generation_spec(
+        "qwen2.5-vl-3b-instruct",
+        description=(
+            "Qwen2.5 VL 3B Instruct model code. Registered for direct selection; current forecasting calls remain text-only."
+        ),
+    ),
+    "qwen3-vl-30b-a3b-thinking": _dashscope_generation_spec(
+        "qwen3-vl-30b-a3b-thinking",
+        description=(
+            "Qwen3 VL 30B A3B Thinking model code. Registered for direct selection; current forecasting calls remain text-only."
+        ),
+    ),
+    "qwen3-vl-32b-thinking": _dashscope_generation_spec(
+        "qwen3-vl-32b-thinking",
+        description=(
+            "Qwen3 VL 32B Thinking model code. Registered for direct selection; current forecasting calls remain text-only."
+        ),
+    ),
+    "qwen3-vl-235b-a22b-thinking": _dashscope_generation_spec(
+        "qwen3-vl-235b-a22b-thinking",
+        description=(
+            "Qwen3 VL 235B A22B Thinking model code. Registered for direct selection; current forecasting calls remain text-only."
+        ),
     ),
     "text-davinci-003": ModelSpec(
         logical_model_name="text-davinci-003",
@@ -310,6 +384,11 @@ def get_model_spec(logical_model_name):
 
 
 
+def get_model_api_name(logical_model_name):
+    return get_model_spec(logical_model_name).api_model_name
+
+
+
 def get_model_capabilities(logical_model_name):
     return get_model_spec(logical_model_name).capabilities
 
@@ -327,6 +406,11 @@ def get_default_autotune_mode(logical_model_name):
 
 def list_model_specs():
     return [get_model_spec(name) for name in sorted(_MODEL_SPECS)]
+
+
+
+def list_model_names():
+    return sorted(_MODEL_SPECS)
 
 
 

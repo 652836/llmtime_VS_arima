@@ -5,7 +5,9 @@ from data.serialize import SerializerSettings
 from configs.runtime import get_default_model
 from models.model_registry import (
     get_default_autotune_mode,
+    get_model_api_name,
     get_model_capabilities,
+    get_model_spec,
     get_supported_autotune_modes,
 )
 
@@ -87,8 +89,10 @@ def materialize_single_hyper(hyper_grid):
 
 def describe_model_capabilities(model):
     capabilities = get_model_capabilities(model)
+    spec = get_model_spec(model)
     return {
         "model": model,
+        "api_model_name": spec.api_model_name,
         "supports_sampling": capabilities.supports_sampling,
         "supports_nll_scoring": capabilities.supports_nll_scoring,
         "supported_autotune_modes": list(capabilities.supported_autotune_modes),
@@ -96,8 +100,22 @@ def describe_model_capabilities(model):
     }
 
 
+def get_llmtime_model_name(model=None):
+    resolved_model = model or get_default_model()
+    return "LLMTime %s" % get_model_api_name(resolved_model)
+
+
+def get_promptcast_model_name(model=None):
+    resolved_model = model or get_default_model()
+    return "PromptCast %s" % get_model_api_name(resolved_model)
+
+
 DEFAULT_REMOTE_MODEL = get_default_model()
+DEFAULT_REMOTE_MODEL_SPEC = get_model_spec(DEFAULT_REMOTE_MODEL)
+DEFAULT_REMOTE_API_MODEL = DEFAULT_REMOTE_MODEL_SPEC.api_model_name
 DEFAULT_REMOTE_CAPABILITIES = get_model_capabilities(DEFAULT_REMOTE_MODEL)
+DEFAULT_LLMTIME_MODEL_NAME = get_llmtime_model_name(DEFAULT_REMOTE_MODEL)
+DEFAULT_PROMPTCAST_MODEL_NAME = get_promptcast_model_name(DEFAULT_REMOTE_MODEL)
 DEFAULT_SUPPORTED_AUTOTUNE_MODES = tuple(get_supported_autotune_modes(DEFAULT_REMOTE_MODEL))
 DEFAULT_AUTOTUNE_MODE = _resolve_llmtime_autotune_mode(DEFAULT_REMOTE_MODEL)
 DEFAULT_PROMPTCAST_AUTOTUNE_MODE = _resolve_promptcast_autotune_mode(DEFAULT_REMOTE_MODEL)
