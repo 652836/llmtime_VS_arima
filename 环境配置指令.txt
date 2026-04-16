@@ -10,3 +10,6 @@ pip install jupyter notebook ipykernel
 
 python -m ipykernel install --user --name llmtime_qwen --display-name "Python (llmtime_qwen)"
 jupyter notebook --notebookdir=E:\llm\llmtime_VS_arima
+
+cd /d E:\llm\llmtime_VS_arima
+git pull origin llmtime-qwen-native
